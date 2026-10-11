@@ -1,0 +1,65 @@
+<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>DNS AdBlock Flasher</title>
+<style>
+body{font:14px system-ui,sans-serif;margin:0;background:#0d1117;color:#c9d1d9;display:flex;justify-content:center;padding:40px}
+.box{max-width:600px;width:100%;background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px}
+h1{margin:0 0 16px;font-size:20px}
+label{display:block;margin:12px 0 4px;font-weight:600;font-size:13px;color:#8b949e}
+select,input[type=file],button{width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px solid #30363d;background:#0d1117;color:#c9d1d9;font-size:14px;margin-bottom:8px}
+button{background:#238636;border:none;color:#fff;font-weight:600;cursor:pointer;margin-top:12px}
+button:hover{background:#2ea043}
+button:disabled{background:#21262d;color:#484f58;cursor:not-allowed}
+#log{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;margin-top:16px;font-family:monospace;font-size:12px;min-height:80px;white-space:pre-wrap;color:#8b949e}
+.ok{color:#3fb950}.err{color:#f85149}.info{color:#58a6ff}
+</style></head><body><div class=box>
+<h1>DNS AdBlock Web Flasher</h1>
+<p style=color:#8b949e;font-size:13px>Flash firmware directly from browser via USB. Requires Chrome/Edge with Web Serial support.</p>
+<label>Board</label>
+<select id=board>
+<option value=esp32c3>ESP32-C3</option>
+<option value=esp8266>ESP8266 D1 Mini</option>
+<option value=picow>Raspberry Pi Pico W</option>
+</select>
+<label>Firmware (.bin)</label>
+<input type=file id=fwfile accept=.bin>
+<button id=flashbtn onclick=doFlash()>Connect and Flash</button>
+<div id=log>Select board and firmware, then click Flash.</div>
+</div>
+<script type=module>
+const log=document.getElementById('log');
+const btn=document.getElementById('flashbtn');
+function msg(t,c){log.innerHTML+=`<span class="${c||''}">${t}</span>\n`;log.scrollTop=log.scrollHeight}
+window.doFlash=async function(){
+  const board=document.getElementById('board').value;
+  const fileInput=document.getElementById('fwfile');
+  if(!fileInput.files.length){msg('Select a .bin file first','err');return}
+  const file=fileInput.files[0];
+  btn.disabled=true;
+  log.innerHTML='';
+  msg('Loading esptool-js...','info');
+  try{
+    const espTool=await import('https://cdn.jsdelivr.net/npm/esptool-js@latest/bundle.js');
+    msg('Connecting to device...','info');
+    const port=await navigator.serial.requestPort();
+    await port.open({baudRate:115200});
+    const transport=new espTool.Transport(port);
+    const esploader=new espTool.ESPLoader(transport,115200);
+    await esploader.main();
+    msg('Connected: '+esploader.chipName,'ok');
+    const data=await file.arrayBuffer();
+    const flashData=new Uint8Array(data);
+    let addr=0x0;
+    if(board==='esp8266')addr=0x0;
+    else if(board==='esp32c3')addr=0x10000;
+    else if(board==='picow'){msg('Pico W: use uf2conv or picotool for .uf2 files','err');btn.disabled=false;await port.close();return}
+    msg(`Writing ${file.name} (${(file.size/1024).toFixed(1)}KB) at 0x${addr.toString(16)}...`,'info');
+    await esploader.writeFlash([{data:flashData,address:addr}],{flashSize:'keep',eraseAll:false,compress:true,reportProgress:(i,w,t)=>{if(t)msg(`Progress: ${Math.round(w/t*100)}%`,'info')}});
+    msg('Flash complete! Rebooting...','ok');
+    await esploader.hardReset();
+    await port.close();
+  }catch(e){
+    msg('Error: '+e.message,'err');
+  }
+  btn.disabled=false;
+};
+</script></body></html>
